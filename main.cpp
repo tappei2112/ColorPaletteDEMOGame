@@ -84,15 +84,27 @@ int setup(void)
 
   // インターフェースを設定
   Instance::serial_controller.SetInterfacePt(&Instance::Serial);
-  int result = Instance::serial_controller.AutoConnectDevice();
-  if (result == -1) {
-    printfDx("Device Connect Failed.\n");
+  int count = 0;
+  while (1) {
+    int result = Instance::serial_controller.AutoConnectDevice();
+    if (result == -1 && count < 3) {
+      printfDx("Device Connect Failed.\n");
+      printfDx("Retrying...\n");
+    }
+    else if (result == -1) {
+      printfDx("Device Connect Failed. Please Check the Connection and Restart the Software.\n");
+      WaitTimer(5000);
+      return -1;
+    }
+    else {
+      printfDx("Device Connected Successfully!\n");
+      printfDx("Connected COM%d\n", Instance::Serial.GetConnectCOM());
+      break;
+    }
+    ++count;
+    WaitTimer(2000);
   }
-  else {
-    printfDx("Device Connected Successfully!\n");
-    printfDx("Connected COM%d\n", Instance::Serial.GetConnectCOM());
-  }
-  WaitTimer(2000);
+
 
   if (Instance::serial_controller.GetConnectionState() == true) {
     printfDx("Initializing Lottery System...\n");
@@ -487,27 +499,34 @@ int loop(void)
         }
         case 2: //抽選中
         {
-          ASerialDataStruct::ASerialData read_data{};
-          Instance::serial_controller.WriteData(AserialColorPaletteCommand::COMMAND_GET_SYSTEM_STATUS);
-          int result = Instance::serial_controller.ReadData(&read_data);
-          if (result == 0) {
-            if (read_data.data[0] == SYSTEM_STATE_LOTTERY_END) {
-              phase = 3;
-              wait_timer = GetNowCount();
+          if (GetNowCount() - wait_timer >= 1000) { //1秒ごとに抽選結果取得
+            wait_timer = GetNowCount(); // タイマーリセット
+            ASerialDataStruct::ASerialData read_data{};
+            Instance::serial_controller.WriteData(AserialColorPaletteCommand::COMMAND_GET_SYSTEM_STATUS);
+            int result = Instance::serial_controller.ReadData(&read_data);
+            if (result == 0) {
+              if (read_data.data[0] == SYSTEM_STATE_LOTTERY_END) {
+                phase = 3;
+                wait_timer = GetNowCount();
+              }
             }
           }
           break;
         }
         case 3: //抽選結果取得
         {
-          ASerialDataStruct::ASerialData read_data{};
-          Instance::serial_controller.WriteData(AserialColorPaletteCommand::COMMAND_GET_LOTTERY_RESULT);
-          int result = Instance::serial_controller.ReadData(&read_data);
-          if (result == 0) {
-            in_pocket = read_data.data[0];
-            wait_timer = GetNowCount();
-            phase = 4;
+          if (GetNowCount() - wait_timer >= 2000) { //2秒待機
+            Instance::Serial.clear(); // シリアル通信バッファクリア
+            ASerialDataStruct::ASerialData read_data{};
+            Instance::serial_controller.WriteData(AserialColorPaletteCommand::COMMAND_GET_LOTTERY_RESULT);
+            int result = Instance::serial_controller.ReadData(&read_data);
+            if (result == 0) {
+              in_pocket = read_data.data[0];
+              wait_timer = GetNowCount();
+              phase = 4;
+            }
           }
+
           break;
         }
         case 4:
